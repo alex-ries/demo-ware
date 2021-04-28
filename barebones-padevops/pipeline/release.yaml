@@ -1,0 +1,62 @@
+trigger:
+- none
+resources:
+  repositories:
+  - repository: utils
+    type: git
+    path: utils\
+    name: devops-utils
+  pipelines:
+  - pipeline: devopstest
+    source: devopstest-build
+    trigger: 
+      stages:
+      - build
+variables:
+  solutionName: 'DevOpsTest'
+  projectName: alexavanade
+  feedId: c54a2f3c-682c-410c-af18-d0a6900ad0a3
+  feedName: 'DevopsTestSolution'
+stages:
+- stage: test
+  displayName: 'Test environment'
+  jobs:
+  - job: deploy
+    variables:
+      scriptPath: $(Build.SourcesDirectory)\tools\
+      xrmToolPath: $(Build.SourcesDirectory)\sdk\
+      assemblyTempFolder: $(Agent.TempDirectory)\sdk\
+      solutionPath: $(Agent.TempDirectory)\solutions\
+    pool:
+      vmImage: 'windows-2019'
+    displayName: "Deploy"
+    steps:
+      - checkout: utils
+      - task: NuGetAuthenticate@0
+        displayName: 'Authenticating to internal feed'
+      - task: NuGetCommand@2
+        displayName: 'Install Xrm Connection Assemblies'
+        inputs:
+          command: custom
+          arguments: 'install Microsoft.CrmSdk.XrmTooling.CoreAssembly -O $(assemblyTempFolder) -ExcludeVersion'
+      - task: CopyFiles@2
+        displayName: 'Copying Xrm Core Binaries to $(xrmToolPath)'
+        inputs:
+          SourceFolder: $(assemblyTempFolder)
+          Contents: 'Microsoft.*\**\*.dll'
+          TargetFolder: '$(xrmToolPath)'
+          flattenFolders: true
+      - task: CopyFiles@2
+        displayName: 'Copying Newtonsoft JSON.NET to $(xrmToolPath)'
+        inputs:
+          SourceFolder: $(assemblyTempFolder)
+          Contents: 'Newtonsoft.Json\lib\net45\*.dll'
+          TargetFolder: '$(xrmToolPath)'
+          flattenFolders: true
+      - task: NuGetCommand@2
+        displayName: 'Downloading $(solutionName)'
+        inputs:
+          command: custom
+          arguments: 'install $(solutionName) -Source https://pkgs.dev.azure.com/$(projectName)/$(feedId)/_packaging/$(feedName)%40Local/nuget/v3/index.json -O $(solutionPath) -ExcludeVersion'
+      - script: 'dir $(scriptPath)'
+      - powershell: $(scriptPath)Deploy-Solution.ps1 Managed $(solutionName) $(solutionPath)\$(solutionName) $(deploy-appid) $(deploy-secret) $(target-url) $(xrmToolPath) -Verbose

@@ -1,0 +1,55 @@
+trigger:
+  branches:
+    include:
+    - 'main'
+resources:
+  repositories:
+  - repository: utils
+    type: git
+    path: utils\
+    name: devops-utils
+stages:
+- stage: build
+  displayName: 'Build and publish'
+  jobs:
+  - job: Build
+    variables:
+      buildConfiguration: 'Release'
+      solutionName: 'DevOpsTest'
+      scriptPath: $(Build.SourcesDirectory)\devops-utils\tools\
+      solutionPath: $(Build.SourcesDirectory)\devops-cop-demo1\src\solutions\
+      xrmToolSolution: $(Build.SourcesDirectory)\tools\
+      packagePath: $(Build.ArtifactStagingDirectory)\package\
+    pool:
+      vmImage: 'windows-2019'
+    displayName: "Build and package"
+    steps:
+      - checkout: utils
+      - checkout: self
+      - task: NuGetCommand@2
+        displayName: 'Install Xrm Core Tools'
+        inputs:
+          command: custom
+          arguments: 'install Microsoft.CrmSdk.CoreTools -O $(Agent.TempDirectory)'
+      - task: CopyFiles@2
+        displayName: 'Copying Xrm Core Binaries to $(xrmToolSolution)'
+        inputs:
+          SourceFolder: $(Agent.TempDirectory)
+          Contents: 'Microsoft.CrmSdk.CoreTools.*\content\bin\coretools\*'
+          TargetFolder: '$(xrmToolSolution)'
+          flattenFolders: true
+      - powershell: $(scriptPath)\Pack-Solution.ps1 $(solutionName) $(solutionPath) $(packagePath) $(xrmToolSolution) -Verbose
+      - powershell: $(scriptPath)\Create-NugetConfig.ps1 $(solutionName) $(packagePath) $(solutionPath)\$(solutionName) -Verbose
+      - task: NuGetCommand@2
+        displayName: 'Creating Solution Artifact'
+        inputs:
+          command: custom
+          arguments: 'pack $(packagePath)\$(solutionName).nuspec -OutputDirectory $(Build.ArtifactStagingDirectory)'
+      - task: NuGetCommand@2
+        displayName: 'Publishing artifact'
+        inputs:
+          command: 'push'
+          packagesToPush: '$(Build.ArtifactStagingDirectory)\*.nupkg'
+          nuGetFeedType: 'internal'
+          publishVstsFeed: 'c54a2f3c-682c-410c-af18-d0a6900ad0a3/DevopsTestSolution'
+          allowPackageConflicts: true
